@@ -1,19 +1,20 @@
 # core/chatter.py
-import os, sqlite3, asyncio, pytz, json
+import os, json, sqlite3, asyncio, pytz, random
 from datetime import datetime, timedelta
-
 from dotenv import load_dotenv
+
 from telethon import TelegramClient
 from telethon.errors import ChatWriteForbiddenError, ChatAdminRequiredError
 from telethon.tl.functions.channels import JoinChannelRequest
 import openai
 
 # ─── инициализация ───────────────────────────────────────────────
-load_dotenv()                                   # берём .env
-openai.api_key = os.getenv("OPENAI_API_KEY")    # ключ GPT
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-KYIV = pytz.timezone("Europe/Kyiv")
-DB_PATH = "data/found_channels.db"
+KYIV     = pytz.timezone("Europe/Kyiv")
+DB_PATH  = "data/found_channels.db"
+SESS_DIR = os.getenv("SESS_DIR", "sessions")   # <— здесь берётся /data/sessions
 
 PROMPT_SYSTEM = "Ты дружелюбный пользователь чатов о путешествиях."
 PROMPT_USER = (
@@ -27,7 +28,6 @@ def now() -> datetime:
     return datetime.now(tz=KYIV)
 
 def gen_msg() -> str:
-    """Получаем рекламное сообщение из GPT-4o"""
     rsp = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[
@@ -39,47 +39,46 @@ def gen_msg() -> str:
     )
     return rsp.choices[0].message.content.strip()
 
-def pick_account() -> dict:
-    cfg = json.load(open("config.json", encoding="utf-8"))
-    return cfg["accounts"][0]        # если добавишь больше акков — выбирай рандомно
+def load_cfg():
+    return json.load(open("config.json", encoding="utf-8"))
 
 # ─── основная работа ─────────────────────────────────────────────
-async def run_once() -> None:
+async def run_once() -> bool:
+    cfg      = load_cfg()
+    cd_min, cd_max = cfg.get("cooldown_range", [24, 24])
+    acc      = cfg["accounts"][0]
+
     db  = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     cur = db.cursor()
 
-    # берём первую подходящую группу, куда не писали за последние 24 ч
+    # группа пригодна, если next_allowed либо NULL, либо уже прошло
     row = cur.execute(
         """
         SELECT * FROM channels
         WHERE type IN ('group','comment')
-          AND (last_post IS NULL OR last_post < ?)
+          AND (next_allowed IS NULL OR next_allowed < datetime('now'))
         ORDER BY RANDOM()
         LIMIT 1
-        """,
-        ((now() - timedelta(hours=24)).isoformat(),),
+        """
     ).fetchone()
 
     if not row:
         print("Нет подходящих групп: всё обработано или база пуста.")
         db.close()
-        return
+        return False
 
     uname = row["username"]
     print(f"→ Пишу в @{uname}")
 
-    acc = pick_account()
     client = TelegramClient(
-        os.path.join("sessions", acc["name"]),
+        os.path.join(SESS_DIR, acc["name"]),
         acc["api_id"],
         acc["api_hash"],
     )
 
     try:
         await client.start(phone=acc["phone"])
-
-        # вступаем, если ещё не внутри
         try:
             await client(JoinChannelRequest(uname))
         except Exception:
@@ -89,26 +88,25 @@ async def run_once() -> None:
         await client.send_message(uname, text)
         print("   ✔ Отправлено:", text)
 
+        pause_h   = random.randint(cd_min, cd_max)
+        next_time = (now() + timedelta(hours=pause_h)).isoformat()
+
         cur.execute(
-            "UPDATE channels SET last_post=? WHERE id=?",
-            (now().isoformat(), row["id"]),
+            "UPDATE channels SET next_allowed=? WHERE id=?",
+            (next_time, row["id"]),
         )
         db.commit()
+        return True
 
-    # ── ловим «писать нельзя» и сразу помечаем readonly
-    except ChatWriteForbiddenError:
-        print(f"   🚫 В @{uname} писать запрещено — помечаю readonly")
+    except (ChatWriteForbiddenError, ChatAdminRequiredError):
+        print(f"   🚫 В @{uname} писать нельзя — помечаю readonly")
         cur.execute("UPDATE channels SET type='readonly' WHERE id=?", (row["id"],))
         db.commit()
+        return False
 
-    except ChatAdminRequiredError:
-        print(f"   🚫 В @{uname} могут писать только админы — помечаю readonly")
-        cur.execute("UPDATE channels SET type='readonly' WHERE id=?", (row["id"],))
-        db.commit()
-
-    # ── любые другие ошибки просто печатаем
     except Exception as e:
         print("   ⚠️  Ошибка:", e)
+        return False
 
     finally:
         await client.disconnect()

@@ -1,11 +1,14 @@
 {
+  "cooldown_range": [24, 72],  
   "accounts": [
     {
       "name": "main",
       "phone": "+380977447700",
       "api_id": 21727703,
       "api_hash": "40c7f691abb0735c549cdb580c45f624",
-      "proxy": null
+      "proxy": false,
+      "max_daily_posts": 40,
+      "sleep_range": [30, 120]
     }
   ]
 }
