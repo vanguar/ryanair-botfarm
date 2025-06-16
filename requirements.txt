@@ -1,0 +1,6 @@
+telethon
+langdetect
+openai
+flask
+python-dotenv
+apscheduler
