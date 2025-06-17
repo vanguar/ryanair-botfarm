@@ -26,18 +26,18 @@ from telethon.sessions import StringSession
 from telethon.errors import ChatWriteForbiddenError, ChatAdminRequiredError
 from telethon.tl.functions.channels import JoinChannelRequest
 
-# ────────────────────────── настройка и константы ─────────────────────────────
+# ────────────────────────── настройка и константы ────────────────────────────
 load_dotenv()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 KYIV           = pytz.timezone("Europe/Kyiv")
 
-ROOT      = Path(__file__).resolve().parent.parent          # /app
+ROOT      = Path(__file__).resolve().parent.parent             # /app
 SESS_DIR  = Path(os.getenv("SESS_DIR", ROOT / "sessions"))
 SESS_DIR.mkdir(parents=True, exist_ok=True)
 
-WATERMARK = "\u2060#x9f"            # невидимый тег
-DB_PATH   = "data/found_channels.db"
+DB_PATH   = ROOT / "data" / "found_channels.db"
+WATERMARK = "\u2060#x9f"                                        # невидимый тег
 
 PROMPT_SYSTEM = (
     "Ты дружелюбный путешественник, обожаешь дешёвые перелёты и делишься "
@@ -49,7 +49,7 @@ PROMPT_USER = (
     "используется в чате."
 )
 
-# ──────────────────────────── логирование ────────────────────────────────────
+# ───────────────────────────── логирование ───────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -57,7 +57,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ──────────────────────────── утилиты ────────────────────────────────────────
+# ────────────────────────────── утилиты ──────────────────────────────────────
 def now() -> datetime:
     return datetime.now(tz=KYIV)
 
@@ -77,11 +77,10 @@ def gen_msg() -> str:
 
 
 def load_cfg() -> dict:
-    with open("config.json", encoding="utf-8") as f:
+    with open(ROOT / "config.json", encoding="utf-8") as f:
         return json.load(f)
 
-
-# ──────────────────────────── основная корутина ──────────────────────────────
+# ───────────────────────────── основная корутина ─────────────────────────────
 async def run_once() -> bool:
     """Один проход: выбрать канал, отправить комментарий, обновить БД."""
     cfg = load_cfg()
@@ -105,14 +104,31 @@ async def run_once() -> bool:
             )
     else:
         client = TelegramClient(
-            os.path.join(SESS_DIR, account["name"]),
+            SESS_DIR / f"{account['name']}.session",
             account["api_id"],
             account["api_hash"],
         )
         await client.start(phone=account["phone"])
     # ─────────────────────────────────────────
 
-    db = sqlite3.connect(DB_PATH)
+    # --- гарантируем наличие каталога /data и таблицы channels ---------------
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if not DB_PATH.exists():
+        con = sqlite3.connect(DB_PATH)
+        con.executescript("""
+        CREATE TABLE IF NOT EXISTS channels (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            username     TEXT UNIQUE COLLATE NOCASE,
+            type         TEXT DEFAULT 'group',  -- group / comment / readonly
+            next_allowed TEXT
+        );
+        """)
+        con.commit()
+        con.close()
+    # -------------------------------------------------------------------------
+
+    db  = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     cur = db.cursor()
 
@@ -172,7 +188,6 @@ async def run_once() -> bool:
         await client.disconnect()
         db.close()
 
-
-# ──────────────────────────── standalone запуск ──────────────────────────────
+# ─────────────────────────── standalone запуск ───────────────────────────────
 if __name__ == "__main__":
     asyncio.run(run_once())
