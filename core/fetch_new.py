@@ -6,24 +6,24 @@ readonly / channel / dead
 
 import asyncio, os, sqlite3, json, pathlib
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon.sessions import StringSession
 
-
-ROOT   = pathlib.Path(__file__).resolve().parent.parent
-DB     = ROOT / "data" / "found_channels.db"
-KWFILE = ROOT / "keywords.txt"
-
-SESS_DIR = ROOT / "sessions"
+ROOT      = pathlib.Path(__file__).resolve().parent.parent      # /app
+DB        = ROOT / "data" / "found_channels.db"
+KWFILE    = ROOT / "keywords.txt"
+SESS_DIR  = ROOT / "sessions"                                   # /app/sessions
 SESS_DIR.mkdir(parents=True, exist_ok=True)
 
-BATCH  = 10   # сколько ключей за прогон
-LIMIT  = 100  # сколько чатов на ключ
+BATCH = 10    # сколько ключей за прогон
+LIMIT = 100   # сколько чатов на ключ
+
 
 def load_account() -> dict:
     cfg = json.load(open(ROOT / "config.json", encoding="utf-8"))
     return cfg["accounts"][0]
+
 
 def next_keywords() -> list[str]:
     if not KWFILE.exists():
@@ -33,79 +33,60 @@ def next_keywords() -> list[str]:
     KWFILE.write_text("\n".join(rest), encoding="utf-8")
     return [l.strip() for l in fresh if l.strip()]
 
-async def fetch():
+
+async def fetch() -> None:
+    acc = load_account()
     kws = next_keywords()
     if not kws:
-        print("🔔 keywords.txt пуст — нечего собирать.")
+        print("⚠️  keywords.txt пуст — нечего искать")
         return
 
-    acc = load_account()
+    # ──────── создаём Telegram-клиент ────────
     if acc.get("session"):
         client = TelegramClient(
             StringSession(acc["session"]),
-            acc["api_id"], acc["api_hash"])
+            acc["api_id"], acc["api_hash"]
+        )
+        await client.connect()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "❌ StringSession не авторизован. Сгенерируйте новую строку и "
+                "обновите config.json."
+            )
     else:
         client = TelegramClient(
             SESS_DIR / acc["name"],
-            acc["api_id"], acc["api_hash"])
+            acc["api_id"], acc["api_hash"]
+        )
+        await client.start(phone=acc["phone"])
+    # ─────────────────────────────────────────
 
-    await client.start(phone=acc["phone"])
+    db = sqlite3.connect(DB)
+    cur = db.cursor()
 
-    conn = sqlite3.connect(DB)
-    cur  = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS channels(
-        id INTEGER PRIMARY KEY,
-        username TEXT UNIQUE,
-        title TEXT,
-        lang TEXT,
-        type TEXT,
-        last_post TEXT)""")
-
-    for kw in kws:
-        print("🔍", kw)
-        try:
+    added_total = 0
+    try:
+        for kw in kws:
+            print(f"🔍 keyword: {kw!r}")
             res = await client(SearchRequest(q=kw, limit=LIMIT))
-        except Exception as e:
-            print("   ⚠", e)
-            continue
+            for chat in res.chats:
+                uname = chat.username
+                if not uname:
+                    continue
+                cur.execute(
+                    "INSERT OR IGNORE INTO channels(username) VALUES(?)",
+                    (uname.lower(),)
+                )
+            db.commit()
+            added_total += cur.rowcount
+            print(f"   + {cur.rowcount} new channels")
 
-        for chat in res.chats:
-            if not getattr(chat, "username", None):
-                continue
-            uname = chat.username.lower()
-            title = chat.title or ""
-            try:
-                cur.execute("INSERT OR IGNORE INTO channels(username,title,lang)"
-                            " VALUES(?,?,?)", (uname, title, "unknown"))
-            except Exception:
-                pass
+    finally:
+        db.close()
+        await client.disconnect()
 
-    # ── помечаем типы сразу ───────────────────────────────────
-    rows = cur.execute("SELECT id,username FROM channels WHERE type IS NULL").fetchall()
-    print("Проверяем тип для", len(rows), "чатов")
+    print(f"✅ fetch_new завершён — добавлено {added_total} записей")
 
-    for cid, uname in rows:
-        try:
-            full = await client(GetFullChannelRequest(uname))
-            ch   = full.full_chat
-            tg_type = "group" if getattr(ch, "megagroup", False) else "channel"
-            if tg_type == "channel" and ch.linked_chat_id:
-                tg_type = "comment"
-
-            # «readonly» — у группы/комментариев, если запрет на send_messages
-            rights = getattr(ch, "default_banned_rights", None)
-            if rights and rights.send_messages:
-                tg_type = "readonly"
-
-        except Exception:
-            tg_type = "dead"
-
-        cur.execute("UPDATE channels SET type=? WHERE id=?", (tg_type, cid))
-
-    conn.commit()
-    conn.close()
-    await client.disconnect()
-    print("✅ fetch_new завершён, база пополнена.")
 
 if __name__ == "__main__":
     asyncio.run(fetch())
