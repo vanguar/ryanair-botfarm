@@ -13,6 +13,9 @@ ROOT   = pathlib.Path(__file__).resolve().parent.parent
 DB     = ROOT / "data" / "found_channels.db"
 KWFILE = ROOT / "keywords.txt"
 
+SESS_DIR = ROOT / "sessions"
+SESS_DIR.mkdir(parents=True, exist_ok=True)
+
 BATCH  = 10   # сколько ключей за прогон
 LIMIT  = 100  # сколько чатов на ключ
 
@@ -35,7 +38,7 @@ async def fetch():
         return
 
     acc = load_account()
-    client = TelegramClient(ROOT / "sessions" / acc["name"],
+    client = TelegramClient(SESS_DIR / acc["name"],
                             acc["api_id"], acc["api_hash"])
     await client.start(phone=acc["phone"])
 

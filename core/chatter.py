@@ -18,6 +18,8 @@ import openai
 from telethon import TelegramClient
 from telethon.errors import ChatWriteForbiddenError, ChatAdminRequiredError
 from telethon.tl.functions.channels import JoinChannelRequest
+from pathlib import Path
+
 
 # ── базовая настройка ──────────────────────────────────────────
 load_dotenv()
@@ -26,7 +28,10 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 KYIV           = pytz.timezone("Europe/Kyiv")
 WATERMARK      = "\u2060#x9f"
 DB_PATH        = "data/found_channels.db"
-SESS_DIR       = os.getenv("SESS_DIR", "sessions")
+ROOT = Path(__file__).resolve().parent.parent          # /app
+SESS_DIR = os.getenv("SESS_DIR", str(ROOT / "sessions"))
+Path(SESS_DIR).mkdir(parents=True, exist_ok=True)
+
 
 # включить RPC-трейсы Telethon, если TG_DEBUG=1
 if os.getenv("TG_DEBUG", "").lower() in {"1", "true", "yes"}:
