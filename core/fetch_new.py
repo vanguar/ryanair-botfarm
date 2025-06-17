@@ -13,11 +13,11 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 ROOT      = pathlib.Path(__file__).resolve().parent.parent      # /app
 DB        = ROOT / "data" / "found_channels.db"
 KWFILE    = ROOT / "keywords.txt"
-SESS_DIR  = ROOT / "sessions"                                   # /app/sessions
+SESS_DIR  = ROOT / "sessions"
 SESS_DIR.mkdir(parents=True, exist_ok=True)
 
-BATCH = 10    # сколько ключей за прогон
-LIMIT = 100   # сколько чатов на ключ
+BATCH = 10
+LIMIT = 100
 
 
 def load_account() -> dict:
@@ -41,7 +41,7 @@ async def fetch() -> None:
         print("⚠️  keywords.txt пуст — нечего искать")
         return
 
-    # ──────── создаём Telegram-клиент ────────
+    # ──────── Telegram-клиент ────────
     if acc.get("session"):
         client = TelegramClient(
             StringSession(acc["session"]),
@@ -49,20 +49,30 @@ async def fetch() -> None:
         )
         await client.connect()
         if not await client.is_user_authorized():
-            raise RuntimeError(
-                "❌ StringSession не авторизован. Сгенерируйте новую строку и "
-                "обновите config.json."
-            )
+            raise RuntimeError("❌ StringSession не авторизован")
     else:
         client = TelegramClient(
             SESS_DIR / acc["name"],
             acc["api_id"], acc["api_hash"]
         )
         await client.start(phone=acc["phone"])
-    # ─────────────────────────────────────────
+    # ─────────────────────────────────
+
     DB.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB)
+    db  = sqlite3.connect(DB)
     cur = db.cursor()
+
+    # ──────── авто-DDL ────────
+    cur.executescript("""
+    CREATE TABLE IF NOT EXISTS channels (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        username     TEXT UNIQUE COLLATE NOCASE,
+        type         TEXT DEFAULT 'group',
+        next_allowed TEXT
+    );
+    """)
+    db.commit()
+    # ──────────────────────────
 
     added_total = 0
     try:
@@ -78,9 +88,9 @@ async def fetch() -> None:
                     (uname.lower(),)
                 )
             db.commit()
-            added_total += cur.rowcount
-            print(f"   + {cur.rowcount} new channels")
-
+            added = cur.rowcount if cur.rowcount != -1 else 0
+            added_total += added
+            print(f"   + {added} new channels")
     finally:
         db.close()
         await client.disconnect()
