@@ -8,6 +8,8 @@ import asyncio, os, sqlite3, json, pathlib
 from telethon import TelegramClient
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.sessions import StringSession
+
 
 ROOT   = pathlib.Path(__file__).resolve().parent.parent
 DB     = ROOT / "data" / "found_channels.db"
@@ -38,8 +40,15 @@ async def fetch():
         return
 
     acc = load_account()
-    client = TelegramClient(SESS_DIR / acc["name"],
-                            acc["api_id"], acc["api_hash"])
+    if acc.get("session"):
+        client = TelegramClient(
+            StringSession(acc["session"]),
+            acc["api_id"], acc["api_hash"])
+    else:
+        client = TelegramClient(
+            SESS_DIR / acc["name"],
+            acc["api_id"], acc["api_hash"])
+
     await client.start(phone=acc["phone"])
 
     conn = sqlite3.connect(DB)

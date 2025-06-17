@@ -19,7 +19,7 @@ from telethon import TelegramClient
 from telethon.errors import ChatWriteForbiddenError, ChatAdminRequiredError
 from telethon.tl.functions.channels import JoinChannelRequest
 from pathlib import Path
-
+from telethon.sessions import StringSession
 
 # ── базовая настройка ──────────────────────────────────────────
 load_dotenv()
@@ -89,11 +89,20 @@ async def run_once() -> bool:
     db.row_factory = sqlite3.Row
     cur = db.cursor()
 
-    client = TelegramClient(
-        os.path.join(SESS_DIR, account["name"]),
-        account["api_id"],
-        account["api_hash"],
-    )
+    if account.get("session"):
+        client = TelegramClient(
+            StringSession(account["session"]),
+            account["api_id"],
+            account["api_hash"],
+        )
+    else:
+        client = TelegramClient(
+            os.path.join(SESS_DIR, account["name"]),
+            account["api_id"],
+            account["api_hash"],
+        )
+
+
     await client.start(phone=account["phone"])
 
     try:
