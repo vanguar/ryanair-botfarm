@@ -16,8 +16,8 @@ KWFILE    = ROOT / "keywords.txt"
 SESS_DIR  = ROOT / "sessions"
 SESS_DIR.mkdir(parents=True, exist_ok=True)
 
-BATCH = 10
-LIMIT = 100
+BATCH = 3
+LIMIT = 50
 
 
 def load_account() -> dict:
