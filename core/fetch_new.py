@@ -60,7 +60,7 @@ async def fetch() -> None:
         )
         await client.start(phone=acc["phone"])
     # ─────────────────────────────────────────
-
+    DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB)
     cur = db.cursor()
 
