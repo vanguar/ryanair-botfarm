@@ -1,44 +1,25 @@
-# run_scheduler.py
-
 import asyncio
 import pytz
+import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import core.chatter as chatter
+from core.chatter import run_once
 
-# Устанавливаем часовой пояс для корректной работы расписания
 KYIV = pytz.timezone("Europe/Kyiv")
 
-async def job():
-    """
-    Асинхронная задача-обертка для выполнения.
-    Такая обертка полезна, если в будущем вы захотите добавить
-    дополнительную логику до или после основного вызова (например, логирование).
-    """
-    await chatter.run_once()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%d.%m.%Y %H:%M:%S",
+)
 
-async def main():
-    """
-    Основная асинхронная функция для настройки и запуска планировщика.
-    """
-    # Создаем экземпляр планировщика с указанием часового пояса
+async def main() -> None:
+    """Старт APScheduler и бесконечное ожидание (для Railway)."""
     sched = AsyncIOScheduler(timezone=KYIV)
-
-    # Добавляем задачу в расписание: запускать каждые 30 минут (в :00 и :30)
-    # в период с 9:00 до 23:59 по киевскому времени.
-    sched.add_job(job, "cron", minute="*/30", hour="9-23") #
-
-    # Запускаем планировщик. Ошибки не будет, так как цикл asyncio уже работает.
+    # каждые 30 минут с 09:00 до 23:30 по Киеву
+    sched.add_job(run_once, "cron", minute="*/30", hour="9-23")
     sched.start()
-    print("✅ Планировщик запущен. Постинг каждые 30 минут с 09:00 до 23:59 (Киев).")
-
-    # Используем asyncio.Event().wait() для "вечного" ожидания.
-    # Это элегантный способ не давать скрипту завершиться.
-    try:
-        await asyncio.Event().wait()
-    except (KeyboardInterrupt, SystemExit):
-        print("Планировщик остановлен.")
+    logging.info("✅ Планировщик запущен (09:00-23:30, шаг 30 мин).")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    # asyncio.run() создает и запускает цикл событий, выполняя нашу main() функцию.
-    # Это современный и правильный способ запуска asyncio-приложений.
     asyncio.run(main())
